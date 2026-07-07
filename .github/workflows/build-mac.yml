@@ -1,0 +1,68 @@
+name: Build macOS App
+
+# Se déclenche automatiquement à chaque push sur main/master,
+# ou manuellement depuis l'onglet "Actions" de GitHub
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - "azeroth_updater.py"
+      - "icon.png"
+      - ".github/workflows/build-mac.yml"
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Récupération du code
+        uses: actions/checkout@v4
+
+      - name: Installation de Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installation de PyInstaller
+        run: pip install pyinstaller
+
+      # Génère un .icns multi-résolution à partir d'un simple icon.png
+      # (place un icon.png carré, idéalement 1024x1024, à la racine du repo)
+      - name: Génération de l'icône .icns
+        if: hashFiles('icon.png') != ''
+        run: |
+          mkdir icon.iconset
+          sips -z 16 16     icon.png --out icon.iconset/icon_16x16.png
+          sips -z 32 32     icon.png --out icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     icon.png --out icon.iconset/icon_32x32.png
+          sips -z 64 64     icon.png --out icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   icon.png --out icon.iconset/icon_128x128.png
+          sips -z 256 256   icon.png --out icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   icon.png --out icon.iconset/icon_256x256.png
+          sips -z 512 512   icon.png --out icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   icon.png --out icon.iconset/icon_512x512.png
+          cp icon.png icon.iconset/icon_512x512@2x.png
+          iconutil -c icns icon.iconset -o AzerothUniverse.icns
+
+      - name: Build avec icône
+        if: hashFiles('icon.png') != ''
+        run: |
+          pyinstaller --onefile --console \
+            --name "AzerothUniverseUpdater" \
+            --icon=AzerothUniverse.icns \
+            azeroth_updater.py
+
+      - name: Build sans icône (si icon.png absent)
+        if: hashFiles('icon.png') == ''
+        run: |
+          pyinstaller --onefile --console \
+            --name "AzerothUniverseUpdater" \
+            azeroth_updater.py
+
+      - name: Publication du binaire compilé
+        uses: actions/upload-artifact@v4
+        with:
+          name: AzerothUniverseUpdater-macOS
+          path: dist/AzerothUniverseUpdater
+          if-no-files-found: error
