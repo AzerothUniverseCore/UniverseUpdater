@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Azeroth Universe - Installateur / Updater client (Mac)
+Azeroth Universe Installateur / Updater client (Mac)
 ========================================================
 
 Ce script :
