@@ -5,10 +5,12 @@ Azeroth Universe Installateur / Updater client (Mac)
 ========================================================
 
 Ce script :
-  1. Télécharge l'archive du client (AzerothUniverse_platform_Mac.zip)
-  2. La dézippe dans le dossier racine du jeu
-  3. Télécharge tous les patchs listés (Data/ et Data/frFR/) et les
-     remplace dans les dossiers correspondants
+  1. Télécharge et extrait l'archive du client de base
+     (AzerothUniverse_platform_Mac.zip)
+  2. Récupère le manifeste du client (liste complète des patchs, tailles
+     et empreintes) depuis le même serveur que le launcher Windows, et
+     ne télécharge que les fichiers manquants ou obsolètes (Data/ et
+     Data/frFR/) - au lieu de tout retélécharger à chaque fois.
 
 L'exécutable compilé (voir instructions à la fin) est prévu pour être placé
 directement à la racine du dossier du jeu, à côté du dossier "Data" :
@@ -21,14 +23,19 @@ directement à la racine du dossier du jeu, à côté du dossier "Data" :
 
 Aucune dépendance externe n'est nécessaire (uniquement la bibliothèque
 standard Python), afin de simplifier la compilation en exécutable.
+Seule l'extraction des éventuels patchs multi-parties (volumes RAR,
+utilisés pour les fichiers dépassant certaines limites d'hébergement)
+nécessite un exécutable `unrar` externe - voir la section correspondante.
 """
 
 import os
 import sys
+import json
+import time
 import shutil
 import zipfile
-import hashlib
 import tempfile
+import subprocess
 import urllib.request
 import urllib.error
 
@@ -38,33 +45,17 @@ import urllib.error
 
 CLIENT_ZIP_URL = "https://azeroth-universe.eu/uploads/client/AzerothUniverse_platform_Mac.zip"
 
-PATCH_BASE_ROOT = "https://azeroth-universe.eu/universe_client/Data"
-PATCH_BASE_FRFR = "https://azeroth-universe.eu/universe_client/Data/frFR"
-
-# Liste des patchs du dossier Data/ (nom, taille en Ko - indicatif uniquement)
-ROOT_PATCHES = [
-    "common.MPQ", "common-2.MPQ", "expansion.MPQ", "lichking.MPQ",
-    "patch.MPQ", "patch-2.MPQ", "patch-3.MPQ", "patch-4.MPQ",
-    "patch-5.MPQ", "patch-6.MPQ", "patch-7.MPQ", "patch-8.MPQ",
-    "patch-9.MPQ", "patch-A.MPQ", "patch-B.MPQ", "patch-C.MPQ",
-    "patch-D.MPQ", "patch-E.MPQ", "patch-F.MPQ", "patch-I.MPQ",
-    "patch-K.MPQ", "patch-N.MPQ", "patch-T.MPQ", "patch-U.MPQ",
-    "patch-V.MPQ", "patch-Y.MPQ", "patch-Z.MPQ",
-]
-
-# Liste des patchs du dossier Data/frFR/
-FRFR_PATCHES = [
-    "backup-frFR.MPQ", "base-frFR.MPQ", "expansion-locale-frFR.MPQ",
-    "expansion-speech-frFR.MPQ", "lichking-locale-frFR.MPQ",
-    "lichking-speech-frFR.MPQ", "locale-frFR.MPQ", "patch-frFR.MPQ",
-    "patch-frFR-2.MPQ", "patch-frFR-3.MPQ", "patch-frFR-4.MPQ",
-    "patch-frFR-5.MPQ", "patch-frFR-6.MPQ", "patch-frFR-7.MPQ",
-    "patch-frFR-8.MPQ", "patch-frFR-U.MPQ", "patch-frFR-X.MPQ",
-    "speech-frFR.MPQ",
-]
+# Même manifeste que le Mini Launcher Windows (azeroth_launcher_win.py) :
+# {"version", "total_size", "files":[{"path","url","size","md5"}, ...]}
+# En centralisant la liste des patchs côté serveur plutôt que dans ce
+# script, on évite le problème qui a cassé cette version : des URLs
+# codées en dur qui finissent par ne plus correspondre à la réalité de
+# l'hébergement.
+MANIFEST_URL = "https://azeroth-universe.eu/universe_launcher/manifest.php"
 
 MAX_RETRIES = 3
-CHUNK_SIZE = 1024 * 256  # 256 Ko
+RETRY_DELAY_SECONDS = 2   # x2 à chaque nouvel essai
+CHUNK_SIZE = 1024 * 256   # 256 Ko
 
 
 # ----------------------------------------------------------------------
@@ -91,6 +82,7 @@ def base_dir():
 
 
 def human_size(n_bytes):
+    n_bytes = float(n_bytes)
     for unit in ["o", "Ko", "Mo", "Go"]:
         if n_bytes < 1024:
             return f"{n_bytes:.1f} {unit}"
@@ -116,7 +108,7 @@ def print_progress(prefix, done, total, width=32):
 def download_file(url, dest_path, label=None):
     """
     Télécharge un fichier avec affichage de progression et tentatives
-    multiples en cas d'échec réseau.
+    multiples en cas d'échec réseau (délai progressif entre essais).
     """
     label = label or os.path.basename(dest_path)
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
@@ -125,7 +117,7 @@ def download_file(url, dest_path, label=None):
     last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "AzerothUniverseUpdater/1.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "AzerothUniverseUpdater/2.0"})
             with urllib.request.urlopen(req, timeout=30) as response, open(tmp_path, "wb") as out_file:
                 total = int(response.headers.get("Content-Length", 0))
                 downloaded = 0
@@ -144,8 +136,165 @@ def download_file(url, dest_path, label=None):
             print(f"\n  ! Échec ({attempt}/{MAX_RETRIES}) pour {label} : {exc}")
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY_SECONDS * attempt)
 
     print(f"  ✗ Impossible de télécharger {label} : {last_error}")
+    return False
+
+
+def find_unrar_bin():
+    """
+    Recherche un exécutable `unrar` capable d'extraire les patchs
+    multi-parties, dans cet ordre :
+      1. à côté du script/app (base_dir()/unrar)
+      2. emplacements Homebrew habituels (Apple Silicon puis Intel)
+      3. dans le PATH système
+    Renvoie le chemin trouvé, ou None.
+
+    Installation via Homebrew : `brew install unrar` (ou `brew install rar`
+    selon les versions de formule disponibles).
+    """
+    candidates = [
+        os.path.join(base_dir(), "unrar"),
+        "/opt/homebrew/bin/unrar",
+        "/usr/local/bin/unrar",
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return shutil.which("unrar")
+
+
+# ----------------------------------------------------------------------
+# Manifeste / vérification des patchs
+# ----------------------------------------------------------------------
+
+def fetch_manifest():
+    """Télécharge et parse le manifeste JSON du client (même source que
+    le launcher Windows)."""
+    req = urllib.request.Request(
+        MANIFEST_URL, headers={"User-Agent": "AzerothUniverseUpdater/2.0"}
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        data = resp.read()
+    return json.loads(data.decode("utf-8"))
+
+
+def scan_updates(manifest, root):
+    """
+    Compare le manifeste avec le contenu local et renvoie la liste des
+    entrées à télécharger : fichier absent, taille différente, ou (pour
+    les patchs multi-parties / archives) fichier témoin d'extraction
+    manquant.
+    """
+    to_download = []
+    for entry in manifest.get("files", []):
+        entry_type = entry.get("type", "single")
+
+        if entry_type == "archive":
+            marker_path = os.path.join(root, entry["marker"].replace("/", os.sep))
+            need = not os.path.isfile(marker_path)
+        else:
+            rel = entry["path"].replace("/", os.sep)
+            local_path = os.path.join(root, rel)
+            need = False
+            if not os.path.isfile(local_path):
+                need = True
+            elif entry_type != "rar_parts":
+                try:
+                    if os.path.getsize(local_path) != entry.get("size", -1):
+                        need = True
+                except OSError:
+                    need = True
+
+        if need:
+            to_download.append(entry)
+    return to_download
+
+
+def download_entry(entry, root):
+    """
+    Télécharge (et extrait si nécessaire) une entrée du manifeste.
+    Gère trois cas : fichier simple, patch multi-parties (volumes RAR),
+    et archive à extraire (avec fichier témoin) - ces deux derniers cas
+    ne servent que si le manifeste les utilise un jour ; dans le cas
+    normal (patchs .MPQ classiques), seul le cas "single" est utilisé.
+    """
+    entry_type = entry.get("type", "single")
+    label = entry["path"]
+
+    if entry_type == "single":
+        dest = os.path.join(root, entry["path"].replace("/", os.sep))
+        if os.path.exists(dest):
+            os.remove(dest)
+        return download_file(entry["url"], dest, label=label)
+
+    if entry_type == "rar_parts":
+        dest = os.path.join(root, entry["path"].replace("/", os.sep))
+        parts_dir = os.path.join(root, ".parts_tmp", os.path.splitext(os.path.basename(dest))[0])
+        os.makedirs(parts_dir, exist_ok=True)
+        part_paths = []
+        try:
+            for part in entry["parts"]:
+                part_path = os.path.join(parts_dir, os.path.basename(part["url"]))
+                if not download_file(part["url"], part_path, label=f"{label} (partie)"):
+                    return False
+                part_paths.append(part_path)
+
+            unrar = find_unrar_bin()
+            if not unrar:
+                print(f"  ✗ unrar introuvable : impossible d'extraire {label} "
+                      f"(brew install unrar, ou placez le binaire à côté de l'application).")
+                return False
+
+            print(f"  Extraction de {label} en cours…")
+            result = subprocess.run(
+                [unrar, "x", "-y", "-o+", part_paths[0], os.path.dirname(dest) + os.sep],
+                capture_output=True, text=True, timeout=1800,
+            )
+            if result.returncode != 0:
+                print(f"  ✗ Échec de l'extraction de {label} : {(result.stderr or result.stdout)[:300]}")
+                return False
+            if not os.path.isfile(dest):
+                print(f"  ✗ Extraction terminée mais {label} est introuvable.")
+                return False
+            return True
+        finally:
+            shutil.rmtree(parts_dir, ignore_errors=True)
+
+    if entry_type == "archive":
+        dest = os.path.join(root, entry["path"].replace("/", os.sep))
+        extract_to = os.path.join(root, entry.get("extract_to", "").replace("/", os.sep))
+        marker = os.path.join(root, entry["marker"].replace("/", os.sep))
+        os.makedirs(extract_to, exist_ok=True)
+        if not download_file(entry["url"], dest, label=label):
+            return False
+
+        unrar = find_unrar_bin()
+        if not unrar:
+            print(f"  ✗ unrar introuvable : impossible d'extraire {label}.")
+            return False
+
+        print(f"  Extraction de {label} en cours…")
+        result = subprocess.run(
+            [unrar, "x", "-y", "-o+", dest, extract_to + os.sep],
+            capture_output=True, text=True, timeout=1800,
+        )
+        if result.returncode != 0:
+            print(f"  ✗ Échec de l'extraction de {label} : {(result.stderr or result.stdout)[:300]}")
+            return False
+
+        os.makedirs(os.path.dirname(marker), exist_ok=True)
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write("OK")
+        try:
+            os.remove(dest)
+        except OSError:
+            pass
+        return True
+
+    print(f"  ✗ Type d'entrée inconnu pour {label} : {entry_type}")
     return False
 
 
@@ -180,38 +329,44 @@ def install_full_client(root):
 
 
 def update_patches(root):
-    """Télécharge tous les patchs et remplace les anciens fichiers."""
-    print("\n=== Étape 2/2 : Mise à jour des patchs ===\n")
+    """
+    Récupère le manifeste et ne télécharge que les patchs manquants ou
+    obsolètes (Data/ et Data/frFR/), au lieu de tout retélécharger.
+    """
+    print("\n=== Étape 2/2 : Mise à jour des patchs (via manifeste) ===\n")
 
-    data_dir = os.path.join(root, "Data")
-    frfr_dir = os.path.join(data_dir, "frFR")
-    os.makedirs(data_dir, exist_ok=True)
-    os.makedirs(frfr_dir, exist_ok=True)
+    try:
+        manifest = fetch_manifest()
+    except Exception as exc:
+        print(f"✗ Impossible de récupérer le manifeste ({MANIFEST_URL}) : {exc}")
+        print("  Vérifiez votre connexion, ou que cette URL est bien accessible.")
+        return False
 
-    jobs = []
-    for name in ROOT_PATCHES:
-        jobs.append((f"{PATCH_BASE_ROOT}/{name}", os.path.join(data_dir, name), f"Data/{name}"))
-    for name in FRFR_PATCHES:
-        jobs.append((f"{PATCH_BASE_FRFR}/{name}", os.path.join(frfr_dir, name), f"Data/frFR/{name}"))
+    to_update = scan_updates(manifest, root)
+    total_files = len(manifest.get("files", []))
+
+    if not to_update:
+        print(f"✅ Client déjà à jour ({total_files} fichiers vérifiés).")
+        return True
+
+    missing_size = sum(e.get("size", 0) for e in to_update)
+    print(f"{len(to_update)}/{total_files} fichier(s) à télécharger ({human_size(missing_size)}).\n")
 
     ok_count = 0
     failed = []
-
-    for i, (url, dest, label) in enumerate(jobs, start=1):
-        print(f"[{i}/{len(jobs)}] {label}")
-        # Remplace l'ancien fichier s'il existe déjà
-        if os.path.exists(dest):
-            os.remove(dest)
-        if download_file(url, dest, label=label):
+    for i, entry in enumerate(to_update, start=1):
+        print(f"[{i}/{len(to_update)}] {entry['path']}")
+        if download_entry(entry, root):
             ok_count += 1
         else:
-            failed.append(label)
+            failed.append(entry["path"])
 
-    print(f"\nPatchs mis à jour : {ok_count}/{len(jobs)}")
+    print(f"\nPatchs mis à jour : {ok_count}/{len(to_update)}")
     if failed:
-        print("Les patchs suivants n'ont pas pu être téléchargés :")
+        print("Les fichiers suivants n'ont pas pu être téléchargés :")
         for f in failed:
             print(f"  - {f}")
+        print("\nRelancez la mise à jour (option 2) pour réessayer uniquement ces fichiers.")
     return len(failed) == 0
 
 
