@@ -32,6 +32,7 @@ import os
 import sys
 import json
 import time
+import ssl
 import shutil
 import zipfile
 import tempfile
@@ -56,6 +57,32 @@ MANIFEST_URL = "https://azeroth-universe.eu/universe_launcher/manifest.php"
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 2   # x2 à chaque nouvel essai
 CHUNK_SIZE = 1024 * 256   # 256 Ko
+
+
+def _build_ssl_context():
+    """
+    Construit le contexte SSL utilisé pour tous les téléchargements.
+
+    Problème connu sur macOS avec les applications compilées via
+    PyInstaller : le Python embarqué ne retrouve pas toujours le
+    magasin de certificats racine du système, ce qui provoque une
+    erreur "CERTIFICATE_VERIFY_FAILED" même avec une connexion internet
+    parfaitement valide. On se rabat explicitement sur le magasin de
+    certificats fourni par macOS (/etc/ssl/cert.pem) s'il existe.
+    """
+    for cafile in ("/etc/ssl/cert.pem", "/private/etc/ssl/cert.pem"):
+        if os.path.isfile(cafile):
+            try:
+                return ssl.create_default_context(cafile=cafile)
+            except Exception:
+                continue
+    try:
+        return ssl.create_default_context()
+    except Exception:
+        return None  # urlopen utilisera alors son contexte SSL par défaut
+
+
+SSL_CONTEXT = _build_ssl_context()
 
 
 # ----------------------------------------------------------------------
@@ -118,7 +145,7 @@ def download_file(url, dest_path, label=None):
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "AzerothUniverseUpdater/2.0"})
-            with urllib.request.urlopen(req, timeout=30) as response, open(tmp_path, "wb") as out_file:
+            with urllib.request.urlopen(req, timeout=30, context=SSL_CONTEXT) as response, open(tmp_path, "wb") as out_file:
                 total = int(response.headers.get("Content-Length", 0))
                 downloaded = 0
                 while True:
@@ -176,7 +203,7 @@ def fetch_manifest():
     req = urllib.request.Request(
         MANIFEST_URL, headers={"User-Agent": "AzerothUniverseUpdater/2.0"}
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
+    with urllib.request.urlopen(req, timeout=20, context=SSL_CONTEXT) as resp:
         data = resp.read()
     return json.loads(data.decode("utf-8"))
 
