@@ -6,7 +6,7 @@ Il permet aux joueurs de :
 - télécharger et installer le client de jeu (complet ou par fichier, selon la plateforme)
 - mettre à jour automatiquement le client sans manipulation manuelle
 
-> Sous Windows, deux options existent : le **Launcher Azeroth Universe** complet (application WPF, projet séparé) et le **Mini Launcher** (script Python présent dans ce dépôt), une alternative légère sans dépendance externe.
+> Sous Windows, deux options existent : le **Launcher Azeroth Universe** complet (application WPF, projet séparé) et le **Mini Launcher** (script Python présent dans ce dépôt), une alternative légère sans dépendance externe. Un **Launcher d'urgence** est également disponible en secours si l'hébergement principal est indisponible : il télécharge le client directement depuis les Releases GitHub.
 
 ---
 
@@ -28,6 +28,14 @@ Il permet aux joueurs de :
 - Choix du dossier d'installation via une interface (mémorisé entre les lancements)
 - Boutons intégrés : vérifier les mises à jour, mettre à jour, site web, inscription
 - Aucune dépendance externe (bibliothèque standard Python + Tkinter uniquement)
+
+### 🚨 Windows (secours) — `azeroth_launcher_emergency.py`
+- Même interface et même logique que le Mini Launcher, à utiliser si l'hébergement principal (azeroth-universe.eu) est indisponible
+- Ne dépend d'aucun serveur : télécharge directement depuis les Releases du dépôt GitHub [`UniverseClient`](https://github.com/AzerothUniverseCore/UniverseClient/releases)
+- Détecte automatiquement, pour chaque patch, s'il s'agit d'un asset unique ou d'un patch volumineux scindé en plusieurs volumes RAR (`.part1.rar`/`.part01.rar`, les deux conventions de nommage sont gérées)
+- Reconstitue et extrait automatiquement les patchs multi-parties et les archives complémentaires (`AzerothUniverse.rar`, `Additional.rar`) via UnRAR
+- Tentatives multiples avec délai progressif en cas d'échec réseau, et rapport détaillé (fichier + raison exacte) en cas d'échec persistant
+- Nécessite **UnRAR** (voir [Configuration](#windows-secours)) pour l'extraction des patchs volumineux et des archives complémentaires
 
 ---
 
@@ -71,6 +79,16 @@ Le binaire n'étant pas signé (pas de certificat de signature de code), Windows
 
 Solution : cliquer sur **Informations complémentaires → Exécuter quand même**. Cette étape n'est nécessaire qu'une seule fois.
 
+### Windows (secours)
+
+À utiliser uniquement si le launcher standard ne fonctionne pas (hébergement principal indisponible).
+
+1. Télécharger `AzerothLauncherUrgence.exe` depuis l'onglet [Actions](../../actions) (Artifact) ou [Releases](../../releases)
+2. Si l'exécutable n'embarque pas déjà UnRAR (voir [Configuration](#windows-secours)), placer `UnRAR.exe` dans le même dossier que `AzerothLauncherUrgence.exe`
+3. Lancer l'application et suivre les mêmes étapes que le launcher standard (choix du dossier, Vérifier les mises à jour, Mettre à jour)
+
+Certains patchs volumineux sont scindés en plusieurs volumes RAR sur GitHub : le launcher les télécharge et les reconstitue automatiquement, à condition qu'UnRAR soit disponible (message d'avertissement explicite sinon, avant tout téléchargement inutile).
+
 ---
 
 ## 🗂️ Structure du dépôt
@@ -78,13 +96,16 @@ Solution : cliquer sur **Informations complémentaires → Exécuter quand même
 ```
 UniverseUpdater/
 ├── .github/workflows/
-│   ├── build-mac.yml         # Build automatique macOS
-│   └── build-win.yml         # Build automatique Windows
-├── azeroth_updater_mac.py    # Script principal macOS (console)
-├── azeroth_launcher_win.py   # Script principal Windows (interface graphique)
-├── icon.png                  # Icône source (convertie en .icns par la CI macOS)
-├── icon.icns                 # Icône compilée pour macOS
-├── icon.ico                  # Icône pour la version Windows
+│   ├── build-mac.yml               # Build automatique macOS
+│   ├── build-win.yml               # Build automatique Windows (standard)
+│   └── build-win-emergency.yml     # Build automatique Windows (secours)
+├── azeroth_updater_mac.py          # Script principal macOS (console)
+├── azeroth_launcher_win.py         # Script principal Windows (interface graphique)
+├── azeroth_launcher_emergency.py   # Launcher de secours Windows (téléchargement direct GitHub)
+├── icon.png                        # Icône source (convertie en .icns par la CI macOS)
+├── icon.icns                       # Icône compilée pour macOS
+├── icon.ico                        # Icône pour les versions Windows
+├── UnRAR.exe                       # (optionnel) embarqué dans le launcher de secours si présent
 └── README.md
 ```
 
@@ -117,6 +138,21 @@ pyinstaller --onefile --windowed --name "AzerothLauncher" --icon=icon.ico azerot
 Le binaire compilé se trouve dans `dist/`.
 
 > Contrairement à la version macOS (application console), le launcher Windows est une interface graphique : on utilise `--windowed` pour éviter qu'une fenêtre de console noire ne s'ouvre derrière l'application.
+
+### Windows - secours (recommandé via GitHub Actions)
+
+Le workflow `.github/workflows/build-win-emergency.yml` compile automatiquement le launcher de secours à chaque push touchant `azeroth_launcher_emergency.py`, `icon.ico`, `UnRAR.exe` ou le workflow lui-même, ou manuellement depuis l'onglet **Actions**.
+
+Si `UnRAR.exe` est présent à la racine du dépôt, il est automatiquement embarqué dans l'exécutable (`--add-binary`) : le launcher le retrouve alors tout seul au démarrage, sans installation séparée nécessaire côté joueur.
+
+#### Build manuel (sur Windows)
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --name "AzerothLauncherUrgence" --icon=icon.ico azeroth_launcher_emergency.py
+```
+
+Pour embarquer UnRAR.exe manuellement, ajouter `--add-binary "UnRAR.exe;."` à la commande.
 
 ---
 
@@ -160,6 +196,30 @@ Contrairement à la version macOS, la liste des fichiers n'est pas codée en dur
 ```
 
 Pour ajouter, retirer ou modifier un fichier du client, il suffit de mettre à jour le manifeste côté serveur — aucun changement de code n'est nécessaire.
+
+### Windows (secours)
+
+Contrairement aux deux autres scripts, le launcher de secours ne dépend d'aucune configuration serveur : tout est codé en tête du fichier `azeroth_launcher_emergency.py`.
+
+```python
+GITHUB_RELEASES_BASE = "https://github.com/AzerothUniverseCore/UniverseClient/releases/download"
+
+ROOT_PATCHES = [...]   # patchs du dossier Data/
+FRFR_PATCHES = [...]   # patchs du dossier Data/frFR/
+EXTRA_ARCHIVES = [...] # archives complémentaires (AzerothUniverse.rar, Additional.rar)
+```
+
+Pour chaque patch, le launcher suppose qu'une Release GitHub existe avec un tag identique au nom du fichier (ex. `patch-4.MPQ`). Il essaie d'abord l'asset unique de même nom ; si absent, il sonde automatiquement les volumes RAR multi-parties selon les deux conventions de nommage utilisées sur le dépôt (`.part1.rar`, `.part2.rar`... ou `.part01.rar`, `.part02.rar`...).
+
+**Prérequis pour l'extraction — UnRAR** : les patchs multi-parties et les archives complémentaires sont des volumes RAR qui doivent être reconstitués après téléchargement. Le launcher recherche un exécutable UnRAR dans cet ordre :
+1. à côté du launcher (`UnRAR.exe`)
+2. embarqué dans l'exécutable si compilé avec `--add-binary` (voir [Compilation](#windows---secours-recommandé-via-github-actions))
+3. dans les emplacements d'installation habituels de WinRAR
+4. dans le PATH système
+
+Téléchargement d'UnRAR (freeware, redistribuable) : https://www.rarlab.com/rar_add.htm
+
+> ⚠️ Contrairement au Mini Launcher, toute modification de la liste des patchs (ajout, suppression, renommage) nécessite de mettre à jour ce script et de recompiler — il n'y a pas de manifeste serveur à synchroniser automatiquement.
 
 ---
 
