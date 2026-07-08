@@ -6,7 +6,7 @@ on:
   push:
     branches: [ main, master ]
     paths:
-      - "azeroth_updater.py"
+      - "azeroth_updater_mac.py"
       - "icon.png"
       - ".github/workflows/build-mac.yml"
   workflow_dispatch:
@@ -51,14 +51,14 @@ jobs:
           pyinstaller --onefile --console \
             --name "AzerothUniverseUpdater" \
             --icon=AzerothUniverse.icns \
-            azeroth_updater.py
+            azeroth_updater_mac.py
 
       - name: Build sans icône (si icon.png absent)
         if: hashFiles('icon.png') == ''
         run: |
           pyinstaller --onefile --console \
             --name "AzerothUniverseUpdater" \
-            azeroth_updater.py
+            azeroth_updater_mac.py
 
       - name: Publication du binaire compilé
         uses: actions/upload-artifact@v4
