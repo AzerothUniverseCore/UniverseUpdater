@@ -1,0 +1,85 @@
+name: Build macOS Launcher App (Urgence)
+
+# Se déclenche automatiquement à chaque push sur main/master,
+# ou manuellement depuis l'onglet "Actions" de GitHub
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - "azeroth_launcher_emergency_mac.py"
+      - "icon.png"
+      - "unrar"
+      - ".github/workflows/build-mac-launcher-emergency.yml"
+  workflow_dispatch:
+
+jobs:
+  build-macos-launcher-emergency:
+    runs-on: macos-latest
+
+    steps:
+      - name: Récupération du code
+        uses: actions/checkout@v4
+
+      - name: Installation de Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installation de PyInstaller
+        run: pip install pyinstaller
+
+      # Génère un .icns multi-résolution à partir d'un simple icon.png
+      # (place un icon.png carré, idéalement 1024x1024, à la racine du repo)
+      - name: Génération de l'icône .icns
+        if: hashFiles('icon.png') != ''
+        run: |
+          mkdir icon.iconset
+          sips -z 16 16     icon.png --out icon.iconset/icon_16x16.png
+          sips -z 32 32     icon.png --out icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     icon.png --out icon.iconset/icon_32x32.png
+          sips -z 64 64     icon.png --out icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   icon.png --out icon.iconset/icon_128x128.png
+          sips -z 256 256   icon.png --out icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   icon.png --out icon.iconset/icon_256x256.png
+          sips -z 512 512   icon.png --out icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   icon.png --out icon.iconset/icon_512x512.png
+          cp icon.png icon.iconset/icon_512x512@2x.png
+          iconutil -c icns icon.iconset -o AzerothUniverse.icns
+
+      # Le launcher est une application graphique (Tkinter) : on utilise
+      # --windowed pour obtenir une vraie app .app sans terminal derrière.
+      #
+      # Si un binaire `unrar` (exécutable Mach-O, sans extension) est
+      # présent à la racine du dépôt, il est embarqué dans l'app
+      # (--add-binary) : au premier lancement, le launcher le retrouve
+      # automatiquement dans son dossier temporaire d'extraction (voir
+      # find_unrar_bin dans le script), sans que l'utilisateur ait besoin
+      # d'installer Homebrew/unrar séparément.
+      - name: Build
+        run: |
+          PY_ARGS=(--onefile --windowed --name "AzerothLauncherUrgenceMac")
+
+          if [ -f "icon.png" ]; then
+            PY_ARGS+=(--icon=AzerothUniverse.icns)
+            echo "Icône trouvée : icon.png"
+          else
+            echo "Aucune icône trouvée, build sans icône."
+          fi
+
+          if [ -f "unrar" ]; then
+            PY_ARGS+=(--add-binary "unrar:.")
+            echo "unrar trouvé : sera embarqué dans l'application."
+          else
+            echo "unrar absent du dépôt : l'utilisateur devra l'installer séparément (brew install unrar) ou le placer à côté du launcher."
+          fi
+
+          PY_ARGS+=(azeroth_launcher_emergency_mac.py)
+
+          pyinstaller "${PY_ARGS[@]}"
+
+      - name: Publication du binaire compilé
+        uses: actions/upload-artifact@v4
+        with:
+          name: AzerothLauncherUrgenceMac-macOS
+          path: dist/AzerothLauncherUrgenceMac.app
+          if-no-files-found: error
