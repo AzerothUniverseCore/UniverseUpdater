@@ -12,7 +12,7 @@ Il permet aux joueurs de :
 
 ## ✨ Fonctionnalités
 
-### 🍏 macOS — `azeroth_updater_mac.py`
+### 🍏 macOS - `azeroth_updater_mac.py`
 - Téléchargement du client complet (`AzerothUniverse_platform_Mac.zip`) et extraction automatique
 - Téléchargement et remplacement de tous les patchs `.MPQ` (dossier `Data/` et `Data/frFR/`)
 - Barre de progression en temps réel pour chaque téléchargement
@@ -20,7 +20,7 @@ Il permet aux joueurs de :
 - Détection automatique du dossier racine du jeu (fonctionne où que l'app soit placée)
 - Aucune dépendance externe (bibliothèque standard Python uniquement)
 
-### 🪟 Windows — `azeroth_launcher_win.py`
+### 🖥️ Windows - `azeroth_launcher_win.py`
 - Interface graphique dans l'esprit World of Warcraft (Tkinter, fond sombre, dorures)
 - Récupère le manifeste du client (liste complète des fichiers, tailles et empreintes) depuis le serveur
 - Compare automatiquement le contenu local au manifeste et ne télécharge que les fichiers manquants ou obsolètes
@@ -29,7 +29,7 @@ Il permet aux joueurs de :
 - Boutons intégrés : vérifier les mises à jour, mettre à jour, site web, inscription
 - Aucune dépendance externe (bibliothèque standard Python + Tkinter uniquement)
 
-### 🚨 Windows (secours) — `azeroth_launcher_emergency.py`
+### 🚨 Windows (secours) - `azeroth_launcher_emergency.py`
 - Même interface et même logique que le Mini Launcher, à utiliser si l'hébergement principal (azeroth-universe.eu) est indisponible
 - Ne dépend d'aucun serveur : télécharge directement depuis les Releases du dépôt GitHub [`UniverseClient`](https://github.com/AzerothUniverseCore/UniverseClient/releases)
 - Détecte automatiquement, pour chaque patch, s'il s'agit d'un asset unique ou d'un patch volumineux scindé en plusieurs volumes RAR (`.part1.rar`/`.part01.rar`, les deux conventions de nommage sont gérées)
@@ -56,8 +56,8 @@ Il permet aux joueurs de :
 
 3. Lancer l'application
 4. Choisir dans le menu :
-   - **1** — Installation complète (client + patchs)
-   - **2** — Mise à jour des patchs uniquement
+   - **1** - Installation complète (client + patchs)
+   - **2** - Mise à jour des patchs uniquement
 
 #### ⚠️ Premier lancement sur macOS
 
@@ -195,7 +195,7 @@ Contrairement à la version macOS, la liste des fichiers n'est pas codée en dur
 }
 ```
 
-Pour ajouter, retirer ou modifier un fichier du client, il suffit de mettre à jour le manifeste côté serveur — aucun changement de code n'est nécessaire.
+Pour ajouter, retirer ou modifier un fichier du client, il suffit de mettre à jour le manifeste côté serveur - aucun changement de code n'est nécessaire.
 
 ### Windows (secours)
 
@@ -211,7 +211,7 @@ EXTRA_ARCHIVES = [...] # archives complémentaires (AzerothUniverse.rar, Additio
 
 Pour chaque patch, le launcher suppose qu'une Release GitHub existe avec un tag identique au nom du fichier (ex. `patch-4.MPQ`). Il essaie d'abord l'asset unique de même nom ; si absent, il sonde automatiquement les volumes RAR multi-parties selon les deux conventions de nommage utilisées sur le dépôt (`.part1.rar`, `.part2.rar`... ou `.part01.rar`, `.part02.rar`...).
 
-**Prérequis pour l'extraction — UnRAR** : les patchs multi-parties et les archives complémentaires sont des volumes RAR qui doivent être reconstitués après téléchargement. Le launcher recherche un exécutable UnRAR dans cet ordre :
+**Prérequis pour l'extraction - UnRAR** : les patchs multi-parties et les archives complémentaires sont des volumes RAR qui doivent être reconstitués après téléchargement. Le launcher recherche un exécutable UnRAR dans cet ordre :
 1. à côté du launcher (`UnRAR.exe`)
 2. embarqué dans l'exécutable si compilé avec `--add-binary` (voir [Compilation](#windows---secours-recommandé-via-github-actions))
 3. dans les emplacements d'installation habituels de WinRAR
@@ -219,7 +219,7 @@ Pour chaque patch, le launcher suppose qu'une Release GitHub existe avec un tag 
 
 Téléchargement d'UnRAR (freeware, redistribuable) : https://www.rarlab.com/rar_add.htm
 
-> ⚠️ Contrairement au Mini Launcher, toute modification de la liste des patchs (ajout, suppression, renommage) nécessite de mettre à jour ce script et de recompiler — il n'y a pas de manifeste serveur à synchroniser automatiquement.
+> ⚠️ Contrairement au Mini Launcher, toute modification de la liste des patchs (ajout, suppression, renommage) nécessite de mettre à jour ce script et de recompiler - il n'y a pas de manifeste serveur à synchroniser automatiquement.
 
 ---
 
