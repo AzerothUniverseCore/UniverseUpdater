@@ -104,6 +104,8 @@ ROOT_PATCHES = [
     "patch-K.MPQ", "patch-N.MPQ", "patch-T.MPQ", "patch-U.MPQ",
     "patch-V.MPQ", "patch-Y.MPQ", "patch-Z.MPQ", "patch-ZA.MPQ",
     "patch-ZB.MPQ", "patch-ZC.MPQ", "patch-ZD.MPQ", "patch-ZE.MPQ",
+    "patch-ZF.MPQ", "patch-ZG.MPQ", "patch-ZH.MPQ", "patch-ZI.MPQ",
+    "patch-ZJ.MPQ",
 ]
 
 # Patchs du dossier Data/frFR/
